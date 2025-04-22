@@ -9,6 +9,13 @@
 
 using namespace std;
 
+struct distance_single_sample
+{
+    double distance;
+    int label;
+};
+
+
 // Reads a flattened (NUM_SAMPLES x FEATURE_DIM) binary file of floats
 vector<vector<float>> read_features(const string &filename, size_t num_samples, size_t feature_dim) {
     size_t total_elements = num_samples * feature_dim;
@@ -52,31 +59,58 @@ vector<int> read_labels(const string &filename, size_t num_samples) {
     return labels;
 }
 
-// This function returns the euclidean distance between 2 points -> sqrt((x-y)^2)
-float distance(double x, double y){
-    double diff = x-y;
-    double diff_squared = diff * diff; //Squared of (x-y)^2
-    return sqrt(diff_squared); // Completes the euclidean distance calculation
-}
 
+void calc_distance(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, vector<int>& labels_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES)
+{
+    // Find the distances of test samples against training samples
+    //Have to iterate over each sample and send in the features of each sample, not the actual sample!
+
+    //Loop over test samples -> since we are comparing that to the train samples 
+    for(size_t i = 0; i < NUM_TEST_SAMPLES; ++i)
+    {
+        // Define distance vector of struct we made to store sample distances and labels
+        vector<distance_single_sample> curr_dist;
+        //Reserve space
+        curr_dist.reserve(NUM_SAMPLES_TRAIN);
+
+        // Loop over each training sample since we compare each test sample to each train sample
+        for (size_t j = 0; j < NUM_SAMPLES_TRAIN; ++j)
+        {
+            //Sum for this sample
+            double sum = 0.0;
+            //Loop over each feature in the test sample and train sample and get euclidean distance of them
+            for (size_t k = 0; k < FEATURE_DIM; ++k)
+            {
+                // Distance of single feature from train to test in a SINGLE SAMPLE
+                double diff = features_test[i][k] - features_train[j][k];
+                diff *= diff;
+                sum += diff;
+            }
+            double eu_dist_sample = sqrt(sum);
+            // Store distance in struct
+            curr_dist.push_back({eu_dist_sample, labels_train[j]});
+        }
+        
+    }
+}
 
 
 int main() {
 
-    constexpr size_t NUM_SAMPLES = 50000;
+    constexpr size_t NUM_SAMPLES_TRAIN = 50000;
     constexpr size_t FEATURE_DIM = 512;
+    constexpr size_t NUM_TEST_SAMPLES = 10000;
     
-    vector<vector<float>> features = read_features("train/train_features.bin", NUM_SAMPLES, FEATURE_DIM);
-    vector<int> labels = read_labels("train/train_labels.bin", NUM_SAMPLES);
+    // Training Samples
+    vector<vector<float>> features_train = read_features("train/train_features.bin", NUM_SAMPLES_TRAIN, FEATURE_DIM);
+    vector<int> labels_train = read_labels("train/train_labels.bin", NUM_SAMPLES_TRAIN);
     
-    cout << "First 10 features of sample 0:" << endl;
-    for (size_t i = 0; i < 10; ++i) {
-        cout << features[0][i] << " ";
-    }
-    cout << endl;
-    cout << "Label of sample 0: " << labels[0] << endl;
+    //Test Samples
+    vector<vector<float>> features_test = read_features("test/test_features.bin", NUM_TEST_SAMPLES, FEATURE_DIM);
+    vector<int> labels_test  = read_labels("test/test_labels.bin", NUM_TEST_SAMPLES);
 
     
+
     return 0;
 }
 
