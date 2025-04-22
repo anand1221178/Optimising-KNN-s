@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 #include <omp.h>
+#include <cmath>
 
 using namespace std;
 
@@ -49,6 +50,13 @@ vector<int> read_labels(const string &filename, size_t num_samples) {
     file.close();
     
     return labels;
+}
+
+// This function returns the euclidean distance between 2 points -> sqrt((x-y)^2)
+float distance(double x, double y){
+    double diff = x-y;
+    double diff_squared = diff * diff; //Squared of (x-y)^2
+    return sqrt(diff_squared); // Completes the euclidean distance calculation
 }
 
 
