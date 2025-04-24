@@ -7,6 +7,7 @@
 #include <omp.h>
 #include <cmath>
 #include <utility>
+#include <algorithm>
 
 using namespace std;
 
@@ -60,6 +61,40 @@ vector<int> read_labels(const string &filename, size_t num_samples) {
     return labels;
 }
 
+int find_majority_label(const vector<distance_single_sample>& sorted_distances, int k) {
+    const int num_classes = 10; 
+    vector<int> votes(num_classes, 0);
+    
+    int num_neighbors_to_check = min(k, static_cast<int>(sorted_distances.size()));
+
+    // If k is 0 or less, or no distances, return a default/error label
+    // if (num_neighbors_to_check <= 0) {
+    //     return -1; // Or another indicator that prediction failed
+    // }
+    
+    for (int i = 0; i < num_neighbors_to_check; ++i) {
+        int label = sorted_distances[i].label;
+        // Check if the label is within the expected range (0-9)
+        if (label >= 0 && label < num_classes) {
+            votes[label]++;
+        }
+    }
+
+    // Find the label with the maximum votes
+    int predicted_label = 0; // Default prediction (e.g., class 0)
+    int max_votes = -1;
+
+    for (int label_index = 0; label_index < num_classes; ++label_index) {
+        if (votes[label_index] > max_votes) {
+            max_votes = votes[label_index];
+            predicted_label = label_index;
+        }
+        // Basic tie-breaking: the first label encountered with max_votes wins.
+    }
+
+    return predicted_label;
+}
+
 int partition(vector<distance_single_sample> &vec, int low, int high) {
 
     // Check basic bounds upfront (optional but safer)
@@ -107,11 +142,15 @@ void quick_sort(vector<distance_single_sample> &vec, int low, int high)
     }
 }
 
-void calc_distance(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, vector<int>& labels_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES)
+vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, vector<int>& labels_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES, int k)
 {
     // Find the distances of test samples against training samples
     //Have to iterate over each sample and send in the features of each sample, not the actual sample!
+    vector<int> all_predictions;
+    all_predictions.reserve(NUM_TEST_SAMPLES);
 
+    cout << "Processing KNN for K=" << k << "..." << endl;
+    
     //Loop over test samples -> since we are comparing that to the train samples 
     for(size_t i = 0; i < NUM_TEST_SAMPLES; ++i)
     {
@@ -137,10 +176,22 @@ void calc_distance(vector<vector<float>>& features_train, vector<int>& labels_tr
             // Store distance in struct
             curr_dist.push_back({eu_dist_sample, labels_train[j]});
         } //end j loop
+
+        // SORT SINGLE SAMPLE
         if(!curr_dist.empty())
         {
             quick_sort(curr_dist, 0, curr_dist.size() -1);
         }
+
+        // PREDICTION OF A SINGLE SAMPLE
+        int predicted_label = find_majority_label(curr_dist, k);
+        all_predictions.push_back(predicted_label);
+
+
+        // COOL LENGTH THINGY
+        if ((i + 1) % 100 == 0) {
+            cout << "  Processed " << (i + 1) << "/" << NUM_TEST_SAMPLES << " test samples for K=" << k << endl;
+       }
     }//end i loop
 }//end function
 
@@ -152,10 +203,12 @@ int main() {
     constexpr size_t NUM_TEST_SAMPLES = 10000;
     
     // Training Samples
+    cout << "Loading training samples... \n" << endl;
     vector<vector<float>> features_train = read_features("train/train_features.bin", NUM_SAMPLES_TRAIN, FEATURE_DIM);
     vector<int> labels_train = read_labels("train/train_labels.bin", NUM_SAMPLES_TRAIN);
     
     //Test Samples
+    cout << "Loading test samples... \n" << endl;
     vector<vector<float>> features_test = read_features("test/test_features.bin", NUM_TEST_SAMPLES, FEATURE_DIM);
     vector<int> labels_test  = read_labels("test/test_labels.bin", NUM_TEST_SAMPLES);
 
