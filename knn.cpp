@@ -6,6 +6,7 @@
 #include <utility>
 #include <omp.h>
 #include <cmath>
+#include <utility>
 
 using namespace std;
 
@@ -59,6 +60,52 @@ vector<int> read_labels(const string &filename, size_t num_samples) {
     return labels;
 }
 
+int partition(vector<distance_single_sample> &vec, int low, int high) {
+
+    // Check basic bounds upfront (optional but safer)
+    if (low >= high || low < 0 || high >= vec.size()) {
+        return low; // Or handle error appropriately
+    }
+
+    // Selecting the distance of the last element as the pivot value
+    double pivot_distance = vec[high].distance; // Correctly get the distance
+
+    // Index of the smaller element
+    int i = (low - 1);
+
+    for (int j = low; j < high; j++) { // Loop up to high-1
+
+        // If current element's distance is smaller than the pivot distance
+        // Using '<' is more standard for Lomuto partition to avoid issues with all equal elements
+        if (vec[j].distance < pivot_distance) { // Correctly compare distances
+            i++;
+            swap(vec[i], vec[j]); // Swap the whole structs
+        }
+    }
+
+    // Put the pivot element (vec[high]) into its correct sorted position
+    swap(vec[i + 1], vec[high]);
+
+    // Return the partition index (the pivot's final position)
+    return (i + 1);
+}
+
+void quick_sort(vector<distance_single_sample> &vec, int low, int high)
+{
+    // Base case: This part will be executed till the starting
+    // index low is lesser than the ending index high
+    if (low < high) {
+
+        // pi is Partitioning Index, arr[p] is now at
+        // right place
+        int pi = partition(vec, low, high);
+
+        // Separately sort elements before and after the
+        // Partition Index pi
+        quick_sort(vec, low, pi - 1);
+        quick_sort(vec, pi + 1, high);
+    }
+}
 
 void calc_distance(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, vector<int>& labels_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES)
 {
@@ -85,14 +132,17 @@ void calc_distance(vector<vector<float>>& features_train, vector<int>& labels_tr
                 double diff = features_test[i][k] - features_train[j][k];
                 diff *= diff;
                 sum += diff;
-            }
+            } //end k loop
             double eu_dist_sample = sqrt(sum);
             // Store distance in struct
             curr_dist.push_back({eu_dist_sample, labels_train[j]});
+        } //end j loop
+        if(!curr_dist.empty())
+        {
+            quick_sort(curr_dist, 0, curr_dist.size() -1);
         }
-        
-    }
-}
+    }//end i loop
+}//end function
 
 
 int main() {
