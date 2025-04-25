@@ -137,12 +137,14 @@ void quick_sort(vector<distance_single_sample> &vec, int low, int high)
 
         // Separately sort elements before and after the
         // Partition Index pi
+        #pragma omp tasks shared(vec)
         quick_sort(vec, low, pi - 1);
+        #pragma omp tasks shared(vec)
         quick_sort(vec, pi + 1, high);
     }
 }
 
-vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, vector<int>& labels_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES, int k)
+vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES, int k)
 {
     // Find the distances of test samples against training samples
     //Have to iterate over each sample and send in the features of each sample, not the actual sample!
@@ -150,7 +152,17 @@ vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& l
     all_predictions.reserve(NUM_TEST_SAMPLES);
 
     cout << "Processing KNN for K=" << k << "..." << endl;
-    
+
+    //Set timing 
+    double total_dist_time = 0.0;
+    double total_sort_time = 0.0;
+
+    // Start overall time here
+    double start_overall_time = omp_get_wtime();
+
+
+    //reduction(+:total_dist_time_acc, total_sort_time_acc)
+    #pragma omp parallel for  schedule(static) num_threads(16)
     //Loop over test samples -> since we are comparing that to the train samples 
     for(size_t i = 0; i < NUM_TEST_SAMPLES; ++i)
     {
@@ -178,21 +190,37 @@ vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& l
         } //end j loop
 
         // SORT SINGLE SAMPLE
+        double start_sort = omp_get_wtime();
         if(!curr_dist.empty())
         {
             quick_sort(curr_dist, 0, curr_dist.size() -1);
         }
+        double end_sort = omp_get_wtime();
+        total_sort_time += (end_sort - start_sort);
 
         // PREDICTION OF A SINGLE SAMPLE
         int predicted_label = find_majority_label(curr_dist, k);
         all_predictions.push_back(predicted_label);
 
 
-        // COOL LENGTH THINGY
-        if ((i + 1) % 100 == 0) {
-            cout << "  Processed " << (i + 1) << "/" << NUM_TEST_SAMPLES << " test samples for K=" << k << endl;
-       }
+    //     // COOL LENGTH THINGY
+    //     if ((i + 1) % 100 == 0) {
+    //         cout << "  Processed " << (i + 1) << "/" << NUM_TEST_SAMPLES << " test samples for K=" << k << endl;
+    //    }
     }//end i loop
+
+    double end_overall_time = omp_get_wtime();
+    double total_runtime = end_overall_time - start_overall_time;
+
+
+    cout << "  Finished Processing for K=" << k << endl;
+    cout << "  Distance Calc Time: " << total_dist_time << " s" << endl;
+    cout << "  Sorting Time:       " << total_sort_time << " s" << endl;
+    cout << "  Total Runtime:      " << total_runtime << " s" << endl;
+
+
+    return all_predictions; // Return the vector of predictions
+
 }//end function
 
 
@@ -212,7 +240,35 @@ int main() {
     vector<vector<float>> features_test = read_features("test/test_features.bin", NUM_TEST_SAMPLES, FEATURE_DIM);
     vector<int> labels_test  = read_labels("test/test_labels.bin", NUM_TEST_SAMPLES);
 
-    
+    // store k in vec, just casue
+    const vector<int> K_Vals = {3,5,7};
+
+
+    for (int k : K_Vals)
+    {
+        
+        vector<int> predicted_labels = run_knn_serial(features_train, labels_train,features_test,NUM_SAMPLES_TRAIN, FEATURE_DIM, NUM_TEST_SAMPLES, k);
+
+        
+        int correct_count = 0;
+        
+        if (predicted_labels.size() == labels_test.size()) {
+            for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
+                if (predicted_labels[i] == labels_test[i]) {
+                    correct_count++;
+                }
+            }
+        }
+
+        double accuracy = (NUM_TEST_SAMPLES > 0)
+                          ? static_cast<double>(correct_count) / NUM_TEST_SAMPLES
+                          : 0.0;
+
+        cout << "  Accuracy for K = " << k << ": " << accuracy * 100.0 << "%" << endl;
+        cout << "------------------------------------" << endl;
+
+    }
+
 
     return 0;
 }
