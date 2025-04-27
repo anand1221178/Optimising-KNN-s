@@ -6,7 +6,7 @@ CXX = g++
 # -Wall -Wextra: Enable most warnings
 # -O2: Optimization level 2 
 # -fopenmp: Enable OpenMP support 
-CXXFLAGS = -std=c++11 -Wall -Wextra -fopenmp
+CXXFLAGS = -std=c++11 -O2 -Wall -Wextra -fopenmp
 
 
 # Target executable name
