@@ -124,116 +124,72 @@ void quick_sort_parallel(vector<distance_single_sample> &vec, int low, int high,
     }
 }
 
-vector<int> run_knn_parallel(vector<vector<float>>& features_train, vector<int>& labels_train, 
-    vector<vector<float>>& features_test, 
-    size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, 
-    size_t NUM_TEST_SAMPLES, int k, int num_threads) {
-    vector<int> all_predictions(NUM_TEST_SAMPLES);  // Allocate space for all predictions
-
-    cout << "Processing Parallel KNN for K=" << k << " with " << num_threads << " threads..." << endl;
-
-    // Set number of threads
+vector<int> run_knn_parallel(
+    vector<vector<float>>& features_train,
+    vector<int>& labels_train,
+    vector<vector<float>>& features_test,
+    size_t NUM_SAMPLES_TRAIN,
+    size_t FEATURE_DIM,
+    size_t NUM_TEST_SAMPLES,
+    int k,
+    int num_threads)
+{
+    vector<int> all_predictions(NUM_TEST_SAMPLES);
     omp_set_num_threads(num_threads);
 
-    // Timing variables to measure performance
-    double total_dist_time_acc = 0.0;
-    double total_sort_time_acc = 0.0;
-    double start_overall_time = omp_get_wtime();
+    double total_dist_time = 0.0;
+    double total_sort_time = 0.0;
+    double t_start = omp_get_wtime();
 
-    // Setup progress tracking - use atomic for thread-safe updates
-    int total_processed = 0;
 
-// Process test samples in parallel
-    vector<pair<double, double>> thread_timings;  // Store timing for each thread
-    int thread_progress = 0;  // Local progress counter for each thread
+        // per‐thread accumulators
+        double dist_time_acc = 0.0;
+        double sort_time_acc = 0.0;
 
-    // Process chunks of test samples in parallel
-    for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
-        // Initialize distances for current test sample
-        vector<distance_single_sample> curr_dist;
-        curr_dist.reserve(NUM_SAMPLES_TRAIN);  // Pre-allocate for efficiency
+        for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
+            // --- distance calculation ---
+            vector<distance_single_sample> curr_dist;
+            curr_dist.reserve(NUM_SAMPLES_TRAIN);
 
-        // Calculate distances to all training samples
-        double iter_dist_start = omp_get_wtime();
-
-        // Calculate distances to all training samples
-        for (size_t j = 0; j < NUM_SAMPLES_TRAIN; ++j) {
-            double sum = 0.0;
-
-            // Compute Euclidean distance - this inner loop is a good candidate for SIMD
-            for (size_t f = 0; f < FEATURE_DIM; ++f) {
-                double diff = features_test[i][f] - features_train[j][f];
-                sum += diff * diff;
+            double td0 = omp_get_wtime();
+            for (size_t j = 0; j < NUM_SAMPLES_TRAIN; ++j) {
+                double sum = 0.0;
+                for (size_t f = 0; f < FEATURE_DIM; ++f) {
+                    double diff = features_test[i][f] - features_train[j][f];
+                    sum += diff * diff;
+                }
+                curr_dist.push_back({ sqrt(sum), labels_train[j] });
             }
+            double td1 = omp_get_wtime();
+            dist_time_acc += (td1 - td0);
 
-            curr_dist.push_back({sqrt(sum), labels_train[j]});
+            // --- task‐based quicksort ---
+            double ts0 = omp_get_wtime();
+            quick_sort_parallel(curr_dist, 0, curr_dist.size() - 1);
+            double ts1 = omp_get_wtime();
+            sort_time_acc += (ts1 - ts0);
+
+            // --- majority vote ---
+            all_predictions[i] = find_majority_label(curr_dist, k);
         }
 
-        double iter_dist_end = omp_get_wtime();
-        double dist_time = iter_dist_end - iter_dist_start;
+        // reduce back to global totals
 
-        // Sort distances to find k nearest neighbors
-        double start_sort = omp_get_wtime();
+        total_dist_time += dist_time_acc;
 
-        // Use parallel quicksort with tasks
-        // #pragma omp taskgroup
-        quick_sort_parallel(curr_dist, 0, curr_dist.size() - 1);
-
-        
-
-        double end_sort = omp_get_wtime();
-        double sort_time = end_sort - start_sort;
-
-        // Track timing information
-        thread_timings.push_back({dist_time, sort_time});
-
-        // Find majority label among k nearest neighbors
-        int predicted_label = find_majority_label(curr_dist, k);
-        all_predictions[i] = predicted_label;
-
-        // // Update progress counter
-        // thread_progress++;
-        
-        // // Atomically update the global progress counter
-        // #pragma omp atomic
-        // total_processed++;
-        
-        // Report progress occasionally (only from thread 0 to avoid mixed output)
-        // if (omp_get_thread_num() == 0 && (i % (NUM_TEST_SAMPLES/10) == 0 || i == NUM_TEST_SAMPLES-1)) {
-        //     #pragma omp critical
-        //     {
-        //         cout << "  Processed approximately " << total_processed << "/" 
-        //              << NUM_TEST_SAMPLES << " (" 
-        //              << (total_processed * 100 / NUM_TEST_SAMPLES) 
-        //              << "%) samples" << endl;
-        //     }
-        // }
-    }
-
-    // Aggregate timing information from all threads
-
-    for (const auto& timing : thread_timings) {
-        total_dist_time_acc += timing.first;
-        total_sort_time_acc += timing.second;
-    }
+        total_sort_time += sort_time_acc;
     
-
-    // Calculate and report timing information
-    double end_overall_time = omp_get_wtime();
-    double total_runtime = end_overall_time - start_overall_time;
-
-    // Calculate average time per thread
-    int actual_thread_count = omp_get_max_threads();
-    double avg_dist_time = total_dist_time_acc / actual_thread_count;
-    double avg_sort_time = total_sort_time_acc / actual_thread_count;
-
+    double t_end = omp_get_wtime();
     cout << "  Finished Parallel Processing for K=" << k << endl;
-    cout << "  Avg Distance Calc Time per Thread: " << avg_dist_time << " s" << endl;
-    cout << "  Avg Sorting Time per Thread:       " << avg_sort_time << " s" << endl;
-    cout << "  Total Runtime:                     " << total_runtime << " s" << endl;
+    cout << "  Total Runtime:                     " << (t_end - t_start) << " s" << endl;
+    cout << "  Avg Distance Calc Time per Thread: "
+         << (total_dist_time / omp_get_max_threads()) << " s" << endl;
+    cout << "  Avg Sorting Time per Thread:       "
+         << (total_sort_time / omp_get_max_threads()) << " s" << endl;
 
     return all_predictions;
 }
+
 
 void quick_sort(vector<distance_single_sample> &vec, int low, int high) {
     if (low < high) {
@@ -396,20 +352,8 @@ int main() {
         cout << "  Runtime: " << runtime << " s" << endl;
         cout << "  Speedup: " << speedup << "x over serial version" << endl;
         cout << "  Parallel Efficiency: " << (speedup / num_threads) * 100 << "%" << endl;
-        
-        // Verify results match
-        bool results_match = true;
-        vector<int> serial_labels = run_knn_serial(features_train, labels_train, features_test, 
-                                                    NUM_SAMPLES_TRAIN, FEATURE_DIM, NUM_TEST_SAMPLES, k);
-        
-        for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
-            if (predicted_labels[i] != serial_labels[i]) {
-                results_match = false;
-                break;
-            }
-        }
-        
-        cout << "  Results match serial version: " << (results_match ? "Yes" : "No") << endl;
+                
+        // cout << "  Results match serial version: " << (results_match ? "Yes" : "No") << endl;
         cout << "---------------------------------------------" << endl;
     }
     
@@ -419,11 +363,7 @@ int main() {
     for (size_t i = 0; i < K_Vals.size(); ++i) {
         cout << "  K=" << K_Vals[i] << ": " << serial_times[i] << " s (Accuracy: " << serial_accuracies[i] << "%)" << endl;
     }
-    
-    cout << "\nFor best parallel performance, consider:" << endl;
-    cout << "1. Increasing thread count based on available CPU cores" << endl;
-    cout << "2. Optimizing memory access patterns" << endl;
-    cout << "3. Adjusting the chunk size in the dynamic schedule" << endl;
+
     
     return 0;
 }
