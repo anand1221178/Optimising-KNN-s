@@ -489,32 +489,65 @@ int main() {
             const vector<int>& serial_predictions = all_serial_predictions[k_idx];
 
             for (int num_threads : thread_counts) {
-                omp_set_num_threads(num_threads);
-                double start_time = omp_get_wtime();
-                vector<int> section_preds = run_knn_parallel_sections(features_train, labels_train, features_test,
-                                                                    NUM_SAMPLES_TRAIN, FEATURE_DIM, NUM_TEST_SAMPLES,
-                                                                    k, num_threads);
-                double end_time = omp_get_wtime();
-                double runtime = end_time - start_time;
+                // TASK-based run
+                {
+                    omp_set_num_threads(num_threads);
+                    double start_time = omp_get_wtime();
+                    vector<int> task_preds = run_knn_parallel(features_train, labels_train, features_test,
+                                                            NUM_SAMPLES_TRAIN, FEATURE_DIM, NUM_TEST_SAMPLES,
+                                                            k, num_threads);
+                    double end_time = omp_get_wtime();
+                    double runtime = end_time - start_time;
 
-                int correct = 0;
-                for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
-                    if (section_preds[i] == labels_test[i]) correct++;
+                    int correct = 0;
+                    for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
+                        if (task_preds[i] == labels_test[i]) correct++;
+                    }
+
+                    double accuracy = 100.0 * correct / NUM_TEST_SAMPLES;
+                    double speedup = serial_runtime / runtime;
+                    double efficiency = (speedup / num_threads) * 100.0;
+
+                    section_out << k << "," << num_threads << ",task,"
+                                << runtime << "," << speedup << "," << efficiency << "," << accuracy << "\n";
+
+                    cout << "TASK     | K=" << k << ", Threads=" << num_threads
+                        << ", Runtime=" << runtime << "s, Speedup=" << speedup
+                        << "x, Eff=" << efficiency << "%, Acc=" << accuracy << "%" << endl;
                 }
 
-                double accuracy = 100.0 * correct / NUM_TEST_SAMPLES;
-                double speedup = serial_runtime / runtime;
-                double efficiency = (speedup / num_threads) * 100.0;
+                // SECTIONS-based run
+                {
+                    omp_set_num_threads(num_threads);
+                    double start_time = omp_get_wtime();
+                    vector<int> section_preds = run_knn_parallel_sections(features_train, labels_train, features_test,
+                                                                        NUM_SAMPLES_TRAIN, FEATURE_DIM, NUM_TEST_SAMPLES,
+                                                                        k, num_threads);
+                    double end_time = omp_get_wtime();
+                    double runtime = end_time - start_time;
 
-                section_out << k << "," << num_threads << ",sections,"
-                            << runtime << "," << speedup << "," << efficiency << "," << accuracy << "\n";
+                    int correct = 0;
+                    for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
+                        if (section_preds[i] == labels_test[i]) correct++;
+                    }
 
-                cout << "SECTION | K=" << k << ", Threads=" << num_threads
-                    << ", Runtime=" << runtime << "s, Speedup=" << speedup
-                    << "x, Eff=" << efficiency << "%, Acc=" << accuracy << "%" << endl;
+                    double accuracy = 100.0 * correct / NUM_TEST_SAMPLES;
+                    double speedup = serial_runtime / runtime;
+                    double efficiency = (speedup / num_threads) * 100.0;
+
+                    section_out << k << "," << num_threads << ",sections,"
+                                << runtime << "," << speedup << "," << efficiency << "," << accuracy << "\n";
+
+                    cout << "SECTIONS | K=" << k << ", Threads=" << num_threads
+                        << ", Runtime=" << runtime << "s, Speedup=" << speedup
+                        << "x, Eff=" << efficiency << "%, Acc=" << accuracy << "%" << endl;
+                }
             }
+
+            cout << "---------------------------------------------" << endl;
         }
         section_out.close();
+
 
 
     
