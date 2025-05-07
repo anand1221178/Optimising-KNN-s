@@ -34,6 +34,7 @@ KNN is a simple machine learning algorithm used for classification. For each tes
 ```
 .
 ├── knn.cpp                  # Main program file
+├── run_knn.sh              # SLURM batch script for cluster execution
 ├── train/
 │   ├── train_features.bin
 │   └── train_labels.bin
@@ -52,10 +53,16 @@ KNN is a simple machine learning algorithm used for classification. For each tes
 make
 ```
 
-### 🚀 Execute
+### 🚀 Execute Locally
 
 ```bash
 ./knn
+```
+
+### 🧠 Execute on Cluster
+
+```bash
+sbatch run_knn.sh
 ```
 
 ---
@@ -100,7 +107,6 @@ make clean
 ```
 
 ---
-
 
 ## 👨‍💻 Author
 
