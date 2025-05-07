@@ -61,9 +61,10 @@ vector<int> read_labels(const string &filename, size_t num_samples) {
 }
 
 int find_majority_label(const vector<distance_single_sample>& sorted_distances, int k) {
+    //Set number of target classes
     const int num_classes = 10; 
 
-    //Create vector votes with 10 rows (classes) each initiallised to 0
+    //Create vector votes with 10 rows for each class each initiallised to 0
     vector<int> votes(num_classes, 0);
     
     int num_neighbors_to_check = min(k, static_cast<int>(sorted_distances.size()));
@@ -76,6 +77,7 @@ int find_majority_label(const vector<distance_single_sample>& sorted_distances, 
         }
     }
 
+    // initial setting
     int predicted_label = 0;
     int max_votes = -1;
 
@@ -91,14 +93,19 @@ int find_majority_label(const vector<distance_single_sample>& sorted_distances, 
     return predicted_label;
 }
 
+// Partition for Qsort
 int partition(vector<distance_single_sample> &vec, int low, int high) {
+    
+    // Edge case check -> return low if not in range
     if (low >= high || low < 0 || high >= static_cast<int>(vec.size())) {
         return low;
     }
 
+    // Last element set as pivot
     double pivot_distance = vec[high].distance;
     int i = (low - 1);
 
+    // Rearrange elements -> smaller b4 pivot
     for (int j = low; j < high; j++) {
         if (vec[j].distance < pivot_distance) {
             i++;
@@ -106,12 +113,16 @@ int partition(vector<distance_single_sample> &vec, int low, int high) {
         }
     }
 
+    // Place pivot correctly
     swap(vec[i + 1], vec[high]);
     return (i + 1);
 }
 
+// OMP task Qsort implentation
 void quick_sort_parallel(vector<distance_single_sample> &vec, int low, int high, int depth = 0) {
-    const int MAX_TASK_DEPTH = 3;  
+    
+    // Limit task creation depth
+    const int MAX_TASK_DEPTH = 3;
     
     if (low < high) {
         // Find partition index
@@ -127,23 +138,29 @@ void quick_sort_parallel(vector<distance_single_sample> &vec, int low, int high,
                 quick_sort_parallel(vec, low, pi - 1, depth + 1);
                 #pragma omp task firstprivate(low,pi,depth) shared(vec)
                 quick_sort_parallel(vec, pi + 1, high, depth + 1);
+
+                // Wait for both tasks to complete before moving on
                 #pragma omp taskwait
 
         }
     }
 }
 
+// QSort par w sections
 void quick_sort_parallel_sections(vector<distance_single_sample> &vec, int low, int high, int depth = 0) {
-    const int MAX_TASK_DEPTH = 3;
+    const int MAX_TASK_DEPTH = 3;// Limit recursion depth for parallel sections
+
     if (low < high) {
         int pi = partition(vec, low, high);
 
         if(depth >= MAX_TASK_DEPTH)
         {
+            // For deep recursion, fall back to sequential quicksort
             quick_sort(vec, low, pi - 1);
             quick_sort(vec, pi + 1, high);
         }
         else{
+             // Use OpenMP parallel sections to sort left and right partitions concurrently
             #pragma omp parallel sections
             {
                 #pragma omp section
@@ -306,32 +323,33 @@ void quick_sort(vector<distance_single_sample> &vec, int low, int high) {
     }
 }
 
-vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& labels_train, vector<vector<float>>& features_test, size_t NUM_SAMPLES_TRAIN, size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES, int k) {
-    vector<int> all_predictions(NUM_TEST_SAMPLES);
+// Serial implementation of the K-Nearest Neighbors (KNN) classifier
+vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& labels_train,vector<vector<float>>& features_test, size_t NUM_SAMPLES_TRAIN,size_t FEATURE_DIM, size_t NUM_TEST_SAMPLES, int k) {
+    vector<int> all_predictions(NUM_TEST_SAMPLES);  // Stores predicted labels for each test sample
 
     cout << "Processing KNN for K=" << k << "..." << endl;
 
     double total_dist_time_acc = 0.0;
     double total_sort_time_acc = 0.0;
-    double start_overall_time = omp_get_wtime();
-    
+    double start_overall_time = omp_get_wtime();  // Start timer for entire run
+
     size_t processed_count = 0;
     size_t report_interval = NUM_TEST_SAMPLES / 10;
-    if (report_interval == 0) {
-        report_interval = 1;
-    }
+    if (report_interval == 0) report_interval = 1;  // Ensure we report at least once
 
+    // Iterate over all test samples
     for (size_t i = 0; i < NUM_TEST_SAMPLES; ++i) {
         vector<distance_single_sample> curr_dist;
-        curr_dist.reserve(NUM_SAMPLES_TRAIN);
+        curr_dist.reserve(NUM_SAMPLES_TRAIN);  // Preallocate for efficiency
 
+        // --- Distance Calculation ---
         double iter_dist_start = omp_get_wtime();
         for (size_t j = 0; j < NUM_SAMPLES_TRAIN; ++j) {
             double sum = 0.0;
+            // Euclidean distance calculation
             for (size_t k = 0; k < FEATURE_DIM; ++k) {
                 double diff = features_test[i][k] - features_train[j][k];
-                diff *= diff;
-                sum += diff;
+                sum += diff * diff;
             }
             double eu_dist_sample = sqrt(sum);
             curr_dist.push_back({eu_dist_sample, labels_train[j]});
@@ -339,28 +357,32 @@ vector<int> run_knn_serial(vector<vector<float>>& features_train, vector<int>& l
         double iter_dist_end = omp_get_wtime();
         total_dist_time_acc += (iter_dist_end - iter_dist_start);
 
+        // --- Sorting distances ---
         double start_sort = omp_get_wtime();
         if (!curr_dist.empty()) {
-            quick_sort(curr_dist, 0, curr_dist.size() - 1);
+            quick_sort(curr_dist, 0, curr_dist.size() - 1);  // Serial quicksort
         }
         double end_sort = omp_get_wtime();
         total_sort_time_acc += (end_sort - start_sort);
 
+        // --- Find predicted label based on K closest distances ---
         int predicted_label = find_majority_label(curr_dist, k);
         all_predictions[i] = predicted_label;
 
+        // Progress reporting
         processed_count++;
         if (processed_count % report_interval == 0) {
-            cout << "  Processed " << processed_count << "/" 
-                 << NUM_TEST_SAMPLES << " (" 
-                 << (processed_count * 100 / NUM_TEST_SAMPLES) 
-                 << "%) samples" << endl;
+        cout << "  Processed " << processed_count << "/" 
+        << NUM_TEST_SAMPLES << " (" 
+        << (processed_count * 100 / NUM_TEST_SAMPLES) 
+        << "%) samples" << endl;
         }
     }
 
     double end_overall_time = omp_get_wtime();
     double total_runtime = end_overall_time - start_overall_time;
 
+    // --- Reporting timings ---
     cout << "  Finished Processing for K=" << k << endl;
     cout << "  Distance Calc Time: " << total_dist_time_acc << " s" << endl;
     cout << "  Sorting Time:       " << total_sort_time_acc << " s" << endl;
